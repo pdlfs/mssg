@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2016 UChicago Argonne, LLC
- * Copyright (c) 2017-2018, Carnegie Mellon University.
+ * Copyright (c) 2018 Carnegie Mellon University.
  *
  * See COPYRIGHT in top-level directory.
  */
@@ -44,7 +44,7 @@ namespace {
 #define ABORT(msg) msg_abort(__FILE__, __LINE__, msg)
 #define OUT_OF_MEMORY() ABORT("out-of-memory, cannot malloc")
 void msg_abort(const char* f, int d, const char* msg) {
-  fprintf(stderr, "=== FATAL === [mssg] ");
+  fprintf(stderr, "=== FATAL === ");
   fprintf(stderr, "%s (%s:%d)", msg, f, d);
   fprintf(stderr, "\n");
   abort();
@@ -70,7 +70,7 @@ char** setup_addr_str_list(int num_addrs, char* buf) {
 }
 
 /*
- * mssg_lookup_cb: adress lookup callback function
+ * mssg_lookup_cb: address lookup callback function
  */
 hg_return_t mssg_lookup_cb(const struct hg_cb_info* info) {
   mssg_lookup_out_t* out = (mssg_lookup_out_t*)info->arg;
