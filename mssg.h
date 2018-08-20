@@ -25,10 +25,11 @@ typedef struct mssg mssg_t;
  * mssg_init_mpi: init mssg using MPI!
  *
  * @param hgcl the mercury class to use
- * @param comm the MPI communicator to use
+ * @param comm the MPI communicator for the entire group
+ * @param recv the MPI communicator for receivers
  * @return pointer to our structure
  */
-mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm);
+mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm rec);
 
 /**
  * mssg_finalize: free mssg state
