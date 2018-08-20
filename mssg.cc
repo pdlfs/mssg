@@ -39,13 +39,14 @@ typedef struct mssg_lookup_out {
 /*
  * helper functions
  */
+namespace {
 
 /*
  * setup_addr_str_list: create an array of pointers into a buffer
  * filled with null terminated strings (using strlen() to get string
  * size as we walk through it).
  */
-static char** setup_addr_str_list(int num_addrs, char* buf) {
+char** setup_addr_str_list(int num_addrs, char* buf) {
   char** ret = (char**)malloc(num_addrs * sizeof(*ret));
   if (ret == NULL) return NULL;
 
@@ -60,7 +61,7 @@ static char** setup_addr_str_list(int num_addrs, char* buf) {
 /*
  * mssg_lookup_cb: adress lookup callback function
  */
-static hg_return_t mssg_lookup_cb(const struct hg_cb_info* info) {
+hg_return_t mssg_lookup_cb(const struct hg_cb_info* info) {
   mssg_lookup_out_t* out = (mssg_lookup_out_t*)info->arg;
   *out->cb_count += 1;
   out->hret = info->ret;
@@ -70,10 +71,12 @@ static hg_return_t mssg_lookup_cb(const struct hg_cb_info* info) {
     out->addr = info->info.lookup.addr;
   return HG_SUCCESS;
 }
+}  // namespace
 
 /*
  * API functions
  */
+extern "C" {
 
 /*
  * mssg_init_mpi: init mssg via MPI.  this doesn't actually do the
@@ -282,4 +285,5 @@ void mssg_finalize(mssg_t* s) {
   free(s->addr_strs);
   free(s->addrs);
   free(s);
+}
 }
