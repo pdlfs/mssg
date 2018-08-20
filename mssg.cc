@@ -28,13 +28,13 @@ struct mssg {
 };
 
 /*
- * mssg_lookup_out: tracks state for looking up hg addr strings
+ * mssg_state: tracks state for looking up hg address strings
  */
-typedef struct mssg_lookup_out {
-  hg_return_t hret;
+typedef struct mssg_state {
+  hg_return_t ret;
   hg_addr_t addr;
-  int* cb_count;
-} mssg_lookup_out_t;
+  int* count;
+} mssg_state_t;
 
 /*
  * helper functions
@@ -70,16 +70,17 @@ char** setup_addr_str_list(int num_addrs, char* buf) {
 }
 
 /*
- * mssg_lookup_cb: address lookup callback function
+ * mssg_cb: address lookup callback function
  */
-hg_return_t mssg_lookup_cb(const struct hg_cb_info* info) {
-  mssg_lookup_out_t* out = (mssg_lookup_out_t*)info->arg;
-  *out->cb_count += 1;
-  out->hret = info->ret;
-  if (out->hret != HG_SUCCESS)
+hg_return_t mssg_cb(const struct hg_cb_info* info) {
+  mssg_state_t* const out = (mssg_state_t*)info->arg;
+  *out->count += 1;
+  out->ret = info->ret;
+  if (out->ret != HG_SUCCESS)
     out->addr = HG_ADDR_NULL;
   else
     out->addr = info->info.lookup.addr;
+
   return HG_SUCCESS;
 }
 }  // namespace
@@ -212,61 +213,58 @@ fini:
  * establish connections to everything we lookup...
  */
 hg_return_t mssg_lookup(mssg_t* s, hg_context_t* hgctx) {
-  // set of outputs
-  mssg_lookup_out_t* out = NULL; /* an array */
-  int cb_count = 0;
-  // "effective" rank for the lookup loop
-  int eff_rank = 0;
+  unsigned int hg_count = 0;
+  mssg_state_t* outs = NULL;
+  hg_return_t hg_ret;
+  int posted = 0;
+  int done = 0;
 
-  // set the hg class up front - need for destructing addrs
-  /* XXX: harmless, but already done by init */
   s->hgcl = HG_Context_get_class(hgctx);
-  if (s->hgcl == NULL) return HG_INVALID_PARAM;
-
-  eff_rank = s->rank;
-  cb_count++;
-
-  // init addr metadata
-  out = (mssg_lookup_out_t*)malloc(s->num_addrs * sizeof(*out));
-  if (out == NULL) return HG_NOMEM_ERROR;
-  // FIXME: lookups don't have a cancellation path, so in an intermediate
-  // error we can't free the memory, lest we cause a segfault
-
-  // rank is set, perform lookup.  we start i at 1 to skip looking up
-  // our own address (we've already got that).
-  hg_return_t hret;
-  for (int i = 1; i < s->num_addrs; i++) {
-    int r = (eff_rank + i) % s->num_addrs;
-    out[r].cb_count = &cb_count;
-    hret = HG_Addr_lookup(hgctx, &mssg_lookup_cb, &out[r], s->addr_strs[r],
-                          HG_OP_ID_IGNORE);
-    if (hret != HG_SUCCESS) return hret;
-  }
-
-  // lookups posted, enter the progress loop until finished
-  do {
-    unsigned int count = 0;
-    do {
-      hret = HG_Trigger(hgctx, 0, 1, &count);
-    } while (hret == HG_SUCCESS && count > 0);
-    if (hret != HG_SUCCESS && hret != HG_TIMEOUT) return hret;
-
-    hret = HG_Progress(hgctx, 100);
-  } while (cb_count < s->num_addrs &&
-           (hret == HG_SUCCESS || hret == HG_TIMEOUT));
-
-  if (hret != HG_SUCCESS && hret != HG_TIMEOUT) return hret;
-
-  for (int i = 0; i < s->num_addrs; i++) {
-    if (i != s->rank) {
-      if (out[i].hret != HG_SUCCESS)
-        return out[i].hret;
-      else
-        s->addrs[i] = out[i].addr;
+  outs = (mssg_state_t*)malloc(s->num_addrs * sizeof(mssg_state_t));
+  if (outs == NULL) {
+    OUT_OF_MEMORY();
+  } else {
+    for (int i = 1; i < s->num_addrs; i++) {
+      const int r = (s->rank + i) % s->num_addrs;
+      outs[r].ret = HG_SUCCESS;
+      outs[r].addr = HG_ADDR_NULL;
+      outs[r].count = &done;
+      if (s->addr_strs[r][0] != 0) {
+        hg_ret = HG_Addr_lookup(hgctx, &mssg_cb, &outs[r], s->addr_strs[r],
+                                HG_OP_ID_IGNORE);
+        if (hg_ret != HG_SUCCESS) {
+          ABORT("fail to HG_Addr_lookup");
+        } else {
+          posted++;
+        }
+      }
     }
   }
 
-  free(out);
+  while (done < posted) {
+    do {
+      hg_ret = HG_Trigger(hgctx, 0, 1, &hg_count);
+    } while (hg_ret == HG_SUCCESS && hg_count > 0);
+    if (hg_ret != HG_SUCCESS && hg_ret != HG_TIMEOUT) {
+      ABORT("fail to HG_Trigger");
+    }
+
+    hg_ret = HG_Progress(hgctx, 100);
+    if (hg_ret != HG_SUCCESS && hg_ret != HG_TIMEOUT) {
+      ABORT("fail to HG_Progress");
+    }
+  }
+
+  for (int i = 1; i < s->num_addrs; i++) {
+    const int r = (s->rank + i) % s->num_addrs;
+    if (outs[r].ret != HG_SUCCESS) {
+      ABORT("HG cb failed");
+    } else {
+      s->addrs[r] = outs[r].addr;
+    }
+  }
+
+  free(outs);
 
   return HG_SUCCESS;
 }
