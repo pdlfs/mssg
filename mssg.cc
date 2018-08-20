@@ -42,6 +42,7 @@ typedef struct mssg_lookup_out {
 namespace {
 /* abort with an error message. */
 #define ABORT(msg) msg_abort(__FILE__, __LINE__, msg)
+#define OUT_OF_MEMORY() ABORT("out-of-memory, cannot malloc")
 void msg_abort(const char* f, int d, const char* msg) {
   fprintf(stderr, "=== FATAL === [mssg] ");
   fprintf(stderr, "%s (%s:%d)", msg, f, d);
@@ -57,7 +58,7 @@ void msg_abort(const char* f, int d, const char* msg) {
 char** setup_addr_str_list(int num_addrs, char* buf) {
   char** result = (char**)malloc(num_addrs * sizeof(char*));
   if (result == NULL) {
-    ABORT("cannot malloc");
+    OUT_OF_MEMORY();
   } else {
     result[0] = buf;
   }
@@ -123,7 +124,7 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
 
     /* this includes the null terminator at the end */
     self_hg_str = (char*)malloc(self_hg_size);
-    if (self_hg_str == NULL) ABORT("cannot malloc");
+    if (self_hg_str == NULL) OUT_OF_MEMORY();
     hg_ret = HG_Addr_to_string(hgcl, self_hg_str, &self_hg_size, self_hg_addr);
     if (hg_ret != HG_SUCCESS) {
       ABORT("fail to HG_Addr_to_string");
@@ -143,14 +144,14 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
 
   /* communicate the size for each address string */
   bufszs = (int*)malloc(comm_size * sizeof(int));
-  if (bufszs == NULL) ABORT("cannot malloc");
+  if (bufszs == NULL) OUT_OF_MEMORY();
   bufszs[comm_rank] = my_addr_size;
   MPI_Allgather(MPI_IN_PLACE, 0, MPI_BYTE, bufszs, 1, MPI_INT, comm);
 
   /* build the displacement list needed by MPI for all gather operations */
   displs = (int*)malloc((comm_size + 1) * sizeof(int));
   if (displs == NULL) {
-    ABORT("cannot malloc");
+    OUT_OF_MEMORY();
   } else {
     displs[0] = 0;
   }
@@ -161,7 +162,7 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
   /* gather all address strings */
   total_bufsz = displs[comm_size]; /* total string length */
   buf = (char*)malloc(total_bufsz);
-  if (buf == NULL) ABORT("cannot malloc");
+  if (buf == NULL) OUT_OF_MEMORY();
   MPI_Allgatherv(my_addr, my_addr_size, MPI_BYTE, buf, bufszs, displs, MPI_BYTE,
                  comm);
 
@@ -169,7 +170,7 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
   addr_strs = setup_addr_str_list(comm_size, buf);
   hg_addrs = (hg_addr_t*)malloc(comm_size * sizeof(hg_addr_t));
   if (hg_addrs == NULL) {
-    ABORT("cannot malloc");
+    OUT_OF_MEMORY();
   } else {
     for (int i = 0; i < comm_size; i++) {
       hg_addrs[i] = HG_ADDR_NULL;
@@ -181,7 +182,7 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
    * to not do anything...
    */
   s = (mssg_t*)malloc(sizeof(mssg_t));
-  if (s == NULL) ABORT("cannot malloc");
+  if (s == NULL) OUT_OF_MEMORY();
   s->hgcl = NULL; /* to be set by mssg_lookup() */
   hg_addrs[comm_rank] = self_hg_addr;
   self_hg_addr = HG_ADDR_NULL;
@@ -273,18 +274,28 @@ hg_return_t mssg_lookup(mssg_t* s, hg_context_t* hgctx) {
 /*
  * mssg_get_rank: gets our rank
  */
-int mssg_get_rank(const mssg_t* s) { return s->rank; }
+int mssg_get_rank(const mssg_t* s) {
+  if (s != NULL)
+    return s->rank;
+  else
+    return -1;
+}
 
 /*
  * mssg_get_count: gets our count (world size)
  */
-int mssg_get_count(const mssg_t* s) { return s->num_addrs; }
+int mssg_get_count(const mssg_t* s) {
+  if (s != NULL)
+    return s->num_addrs;
+  else
+    return -1;
+}
 
 /*
  * mssg_get_addr: get a rank's address
  */
 hg_addr_t mssg_get_addr(const mssg_t* s, int rank) {
-  if (rank >= 0 && rank < s->num_addrs)
+  if (s != NULL && rank >= 0 && rank < s->num_addrs)
     return s->addrs[rank];
   else
     return HG_ADDR_NULL;
@@ -294,7 +305,7 @@ hg_addr_t mssg_get_addr(const mssg_t* s, int rank) {
  * mssg_get_addr_str: get a rank's address string
  */
 const char* mssg_get_addr_str(const mssg_t* s, int rank) {
-  if (rank >= 0 && rank < s->num_addrs)
+  if (s != NULL && rank >= 0 && rank < s->num_addrs)
     return s->addr_strs[rank];
   else
     return NULL;
