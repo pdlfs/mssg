@@ -22,8 +22,8 @@ struct mssg {
   char** addr_strs;  /* addr strings ptr array, points into backing_buf */
   hg_addr_t* addrs;  /* array of mercury address pointers */
   void* backing_buf; /* addr_strs[] backing buffer */
-  int num_addrs;     /* address array size */
   int backing_bufsz; /* the buffer size */
+  int num_addrs;     /* address array size */
   int rank;          /* my rank in the comm we init'd with */
 };
 
@@ -209,8 +209,7 @@ fini:
 }
 
 /*
- * mssg_lookup: lookup all addr strings to get hg_addr_t.  this may
- * establish connections to everything we lookup...
+ * mssg_lookup: lookup all cached address strings to get hg_addr_t.
  */
 hg_return_t mssg_lookup(mssg_t* s, hg_context_t* hgctx) {
   unsigned int hg_count = 0;
@@ -226,8 +225,8 @@ hg_return_t mssg_lookup(mssg_t* s, hg_context_t* hgctx) {
   } else {
     for (int i = 1; i < s->num_addrs; i++) {
       const int r = (s->rank + i) % s->num_addrs;
-      outs[r].ret = HG_SUCCESS;
       outs[r].addr = HG_ADDR_NULL;
+      outs[r].ret = HG_SUCCESS;
       outs[r].count = &done;
       if (s->addr_strs[r][0] != 0) {
         hg_ret = HG_Addr_lookup(hgctx, &mssg_cb, &outs[r], s->addr_strs[r],
