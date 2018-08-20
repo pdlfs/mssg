@@ -23,7 +23,7 @@ struct mssg {
   hg_addr_t* addrs;  /* array of mercury address pointers */
   void* backing_buf; /* addr_strs[] backing buffer */
   int num_addrs;     /* address array size */
-  int buf_size;      /* the buffer size */
+  int backing_bufsz; /* the buffer size */
   int rank;          /* my rank in the comm we init'd with */
 };
 
@@ -100,15 +100,15 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
   hg_addr_t* hg_addrs = NULL;
   hg_return_t hg_ret;
 
-  int buf_sz = 0;
   char* buf = NULL; /* back space for all address strings */
   int* bufszs = NULL;
   int* displs = NULL;
-  char* my_addr = NULL;
-  int my_addr_size = 0;
+  int total_bufsz = 0;
   int comm_size = 0;
   int comm_rank = 0;
 
+  int my_addr_size = 0;
+  char* my_addr = NULL;
   char** addr_strs = NULL;
   mssg_t* s = NULL;
 
@@ -138,17 +138,16 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
     my_addr = (char*)"";
   }
 
-  // gather the buffer sizes: we xchg self_addr_size among ranks via sizes[]
   MPI_Comm_size(comm, &comm_size);
   MPI_Comm_rank(comm, &comm_rank);
 
+  /* communicate the size for each address string */
   bufszs = (int*)malloc(comm_size * sizeof(int));
   if (bufszs == NULL) ABORT("cannot malloc");
   bufszs[comm_rank] = my_addr_size;
   MPI_Allgather(MPI_IN_PLACE, 0, MPI_BYTE, bufszs, 1, MPI_INT, comm);
 
-  // compute a exclusive prefix sum of the data sizes,
-  // including the total at the end
+  /* build the displacement list needed by MPI for all gather operations */
   displs = (int*)malloc((comm_size + 1) * sizeof(int));
   if (displs == NULL) {
     ABORT("cannot malloc");
@@ -160,8 +159,8 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
   }
 
   /* gather all address strings */
-  buf_sz = displs[comm_size]; /* total string length */
-  buf = (char*)malloc(buf_sz);
+  total_bufsz = displs[comm_size]; /* total string length */
+  buf = (char*)malloc(total_bufsz);
   if (buf == NULL) ABORT("cannot malloc");
   MPI_Allgatherv(my_addr, my_addr_size, MPI_BYTE, buf, bufszs, displs, MPI_BYTE,
                  comm);
@@ -183,14 +182,14 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
    */
   s = (mssg_t*)malloc(sizeof(mssg_t));
   if (s == NULL) ABORT("cannot malloc");
-  s->hgcl = NULL;  // to be set by mssg_lookup()
-  s->addr_strs = addr_strs;
-  addr_strs = NULL;
+  s->hgcl = NULL; /* to be set by mssg_lookup() */
   hg_addrs[comm_rank] = self_hg_addr;
   self_hg_addr = HG_ADDR_NULL;
   s->addrs = hg_addrs;
   hg_addrs = NULL;
-  s->buf_size = buf_sz;
+  s->addr_strs = addr_strs;
+  addr_strs = NULL;
+  s->backing_bufsz = total_bufsz;
   s->backing_buf = buf;
   buf = NULL;
   s->num_addrs = comm_size;
@@ -198,12 +197,12 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
 
 fini:
   if (self_hg_addr != HG_ADDR_NULL) HG_Addr_free(hgcl, self_hg_addr);
-  free(buf);
-  free(bufszs);
-  free(addr_strs);
-  free(hg_addrs);
   free(self_hg_str);
+  free(bufszs);
   free(displs);
+  free(hg_addrs);
+  free(addr_strs);
+  free(buf);
   return s;
 }
 
