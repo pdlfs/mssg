@@ -44,7 +44,7 @@ namespace {
 #define ABORT(msg) msg_abort(__FILE__, __LINE__, msg)
 #define OUT_OF_MEMORY() ABORT("out-of-memory, cannot malloc")
 void msg_abort(const char* f, int d, const char* msg) {
-  fprintf(stderr, "=== FATAL === ");
+  fprintf(stderr, "=== ABORT === ");
   fprintf(stderr, "%s (%s:%d)", msg, f, d);
   fprintf(stderr, "\n");
   abort();

@@ -13,9 +13,8 @@
 #      -DCMAKE_PREFIX_PATH='/dir1;/dir2;/dir3'
 #
 
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 3.1)
 project (mssg C CXX)
-enable_testing ()
 
 # link shared lib with full rpath
 set (CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
@@ -33,6 +32,7 @@ set (BUILD_SHARED_LIBS "OFF" CACHE BOOL "Build a shared library")
 # Find required packages
 find_package (mercury CONFIG REQUIRED)
 find_package (MPI MODULE REQUIRED)
+string (REPLACE " " ";" MPI_CXX_COMPILE_FLAGS_LIST "${MPI_CXX_COMPILE_FLAGS}")
 
 #
 # configure/load in standard modules we plan to use and probe the enviroment
@@ -68,29 +68,25 @@ set_target_properties(mssg
                       PROPERTIES VERSION ${MSSG_VERSION}
                       SOVERSION ${MSSG_VERSION_MAJOR})
 
-# special handling for MPI, where the config comes in via MPI_<lang>_ vars.
+# XXX: special handling for MPI, where the config comes in via MPI_<lang>_ vars.
 # Note that the mpich on ub14 gives a leading space that we need to trim off.
-string (REPLACE " " ";" mpicxx_flags "${MPI_CXX_COMPILE_FLAGS}")
-foreach (lcv ${mpicxx_flags})
+foreach (lcv ${MPI_CXX_COMPILE_FLAGS_LIST})
     if (NOT ${lcv} STREQUAL "")
         target_compile_options (mssg PUBLIC $<BUILD_INTERFACE:${lcv}>)
     endif ()
 endforeach ()
 
-# XXX: have to do this one dir at a time otherwise, otherwise I get
-# error: target 'deltafs' INTERFACE_INCLUDE_DIRECTORIES contains path
-#         prefixed in the source directory
+# XXX: have to do this one dir at a time!!
 foreach (lcv ${MPI_CXX_INCLUDE_PATH})
     target_include_directories (mssg PUBLIC $<BUILD_INTERFACE:${lcv}>)
 endforeach ()
 foreach (lcv ${MPI_CXX_LIBRARIES})
     target_link_libraries(mssg $<BUILD_INTERFACE:${lcv}>)
 endforeach ()
+
 # XXX: this doesn't propagate to lib users, is that a problem?
-# XXX: prob ok.
 set_property (TARGET mssg APPEND PROPERTY LINK_FLAGS
               ${MPI_CXX_LINK_FLAGS})
-get_property (link_flags TARGET mssg PROPERTY LINK_FLAGS)
 
 #
 # installation stuff (packaging and install commands)
@@ -104,16 +100,43 @@ write_basic_package_version_file(
 configure_file (mssg-config.cmake.in mssg-config.cmake @ONLY)
 
 #
+# mssg-runner
+#
+
+add_executable(mssg-runner mssg-runner.cc)
+target_link_libraries(mssg-runner mssg)
+
+# XXX: special handling for MPI, where the config comes in via MPI_<lang>_ vars.
+# Note that the mpich on ub14 gives a leading space that we need to trim off.
+foreach (lcv ${MPI_CXX_COMPILE_FLAGS_LIST})
+    if (NOT ${lcv} STREQUAL "")
+        target_compile_options (mssg-runner PUBLIC ${lcv})
+    endif ()
+endforeach ()
+
+# XXX: have to do this one dir at a time!!
+foreach (lcv ${MPI_CXX_INCLUDE_PATH})
+    target_include_directories (mssg-runner PUBLIC ${lcv})
+endforeach ()
+foreach (lcv ${MPI_CXX_LIBRARIES})
+    target_link_libraries(mssg-runner ${lcv})
+endforeach ()
+
+set_property (TARGET mssg-runner APPEND PROPERTY LINK_FLAGS
+        ${MPI_CXX_LINK_FLAGS})
+
+#
 # "make install" rules
 #
 install (TARGETS mssg EXPORT mssg-targets
-         ARCHIVE DESTINATION lib
-         LIBRARY DESTINATION lib)
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib)
+install (TARGETS mssg-runner RUNTIME DESTINATION bin)
 install (EXPORT mssg-targets
-         DESTINATION ${mssg-pkg-loc}
-         FILE "mssg-targets.cmake")
+        DESTINATION ${mssg-pkg-loc}
+        FILE "mssg-targets.cmake")
 install (FILES "${CMAKE_CURRENT_BINARY_DIR}/mssg-config.cmake"
-               "${CMAKE_CURRENT_BINARY_DIR}/mssg-config-version.cmake"
-         DESTINATION ${mssg-pkg-loc} )
+        "${CMAKE_CURRENT_BINARY_DIR}/mssg-config-version.cmake"
+        DESTINATION ${mssg-pkg-loc} )
 install (FILES mssg.h
-         DESTINATION include)
+        DESTINATION include)
