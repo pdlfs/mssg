@@ -26,10 +26,10 @@ typedef struct mssg mssg_t;
  *
  * @param hgcl the mercury class to use
  * @param comm the MPI communicator for the entire group
- * @param recv the MPI communicator for receivers
+ * @param is_recv 0 if the calling rank is not a receiver
  * @return pointer to our structure
  */
-mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv);
+mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, int is_recv);
 
 /**
  * mssg_finalize: free mssg state

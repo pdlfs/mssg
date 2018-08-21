@@ -41,9 +41,9 @@ typedef struct mssg_state {
  */
 namespace {
 /* abort with an error message. */
-#define ABORT(msg) msg_abort(__FILE__, __LINE__, msg)
-#define OUT_OF_MEMORY() ABORT("out-of-memory, cannot malloc")
-void msg_abort(const char* f, int d, const char* msg) {
+#define FATAL(msg) fatal(__FILE__, __LINE__, msg)
+#define mssg_die_with_oom() FATAL("out-of-memory, cannot malloc")
+void fatal(const char* f, int d, const char* msg) {
   fprintf(stderr, "=== ABORT === ");
   fprintf(stderr, "%s (%s:%d)", msg, f, d);
   fprintf(stderr, "\n");
@@ -58,7 +58,7 @@ void msg_abort(const char* f, int d, const char* msg) {
 char** setup_addr_str_list(int num_addrs, char* buf) {
   char** result = (char**)malloc(num_addrs * sizeof(char*));
   if (result == NULL) {
-    OUT_OF_MEMORY();
+    mssg_die_with_oom();
   } else {
     result[0] = buf;
   }
@@ -92,10 +92,9 @@ extern "C" {
 
 /*
  * mssg_init_mpi: init mssg via MPI.  must call mssg_lookup() separately
- * to perform lookups of the address strings.  the recv must be
- * MPI_COMM_NULL if the caller rank is only a sender.
+ * to perform lookups of the address strings.
  */
-mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
+mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, int is_recv) {
   hg_addr_t self_hg_addr = HG_ADDR_NULL;
   char* self_hg_str = NULL;
   hg_size_t self_hg_size = 0;
@@ -115,20 +114,20 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
   mssg_t* s = NULL;
 
   /* get my own hg_addr_t address, and my address string */
-  if (hgcl != NULL && recv != MPI_COMM_NULL) {
+  if (hgcl != NULL && is_recv) {
     hg_ret = HG_Addr_self(hgcl, &self_hg_addr);
     if (hg_ret == HG_SUCCESS)
       hg_ret = HG_Addr_to_string(hgcl, NULL, &self_hg_size, self_hg_addr);
     if (hg_ret != HG_SUCCESS) {
-      ABORT("fail to HG_Addr_self or HG_Addr_to_string");
+      FATAL("fail to HG_Addr_self or HG_Addr_to_string");
     }
 
     /* this includes the null terminator at the end */
     self_hg_str = (char*)malloc(self_hg_size);
-    if (self_hg_str == NULL) OUT_OF_MEMORY();
+    if (self_hg_str == NULL) mssg_die_with_oom();
     hg_ret = HG_Addr_to_string(hgcl, self_hg_str, &self_hg_size, self_hg_addr);
     if (hg_ret != HG_SUCCESS) {
-      ABORT("fail to HG_Addr_to_string");
+      FATAL("fail to HG_Addr_to_string");
     }
   }
 
@@ -145,14 +144,14 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
 
   /* communicate the size for each address string */
   bufszs = (int*)malloc(comm_size * sizeof(int));
-  if (bufszs == NULL) OUT_OF_MEMORY();
+  if (bufszs == NULL) mssg_die_with_oom();
   bufszs[comm_rank] = my_addr_size;
   MPI_Allgather(MPI_IN_PLACE, 0, MPI_BYTE, bufszs, 1, MPI_INT, comm);
 
   /* build the displacement list needed by MPI for all gather operations */
   displs = (int*)malloc((comm_size + 1) * sizeof(int));
   if (displs == NULL) {
-    OUT_OF_MEMORY();
+    mssg_die_with_oom();
   } else {
     displs[0] = 0;
   }
@@ -163,7 +162,7 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
   /* gather all address strings */
   total_bufsz = displs[comm_size]; /* total string length */
   buf = (char*)malloc(total_bufsz);
-  if (buf == NULL) OUT_OF_MEMORY();
+  if (buf == NULL) mssg_die_with_oom();
   MPI_Allgatherv(my_addr, my_addr_size, MPI_BYTE, buf, bufszs, displs, MPI_BYTE,
                  comm);
 
@@ -171,7 +170,7 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
   addr_strs = setup_addr_str_list(comm_size, buf);
   hg_addrs = (hg_addr_t*)malloc(comm_size * sizeof(hg_addr_t));
   if (hg_addrs == NULL) {
-    OUT_OF_MEMORY();
+    mssg_die_with_oom();
   } else {
     for (int i = 0; i < comm_size; i++) {
       hg_addrs[i] = HG_ADDR_NULL;
@@ -183,7 +182,7 @@ mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv) {
    * to not do anything...
    */
   s = (mssg_t*)malloc(sizeof(mssg_t));
-  if (s == NULL) OUT_OF_MEMORY();
+  if (s == NULL) mssg_die_with_oom();
   s->hgcl = NULL; /* to be set by mssg_lookup() */
   hg_addrs[comm_rank] = self_hg_addr;
   self_hg_addr = HG_ADDR_NULL;
@@ -221,7 +220,7 @@ hg_return_t mssg_lookup(mssg_t* s, hg_context_t* hgctx) {
   s->hgcl = HG_Context_get_class(hgctx);
   outs = (mssg_state_t*)malloc(s->num_addrs * sizeof(mssg_state_t));
   if (outs == NULL) {
-    OUT_OF_MEMORY();
+    mssg_die_with_oom();
   } else {
     for (int i = 1; i < s->num_addrs; i++) {
       const int r = (s->rank + i) % s->num_addrs;
@@ -232,7 +231,7 @@ hg_return_t mssg_lookup(mssg_t* s, hg_context_t* hgctx) {
         hg_ret = HG_Addr_lookup(hgctx, &mssg_cb, &outs[r], s->addr_strs[r],
                                 HG_OP_ID_IGNORE);
         if (hg_ret != HG_SUCCESS) {
-          ABORT("fail to HG_Addr_lookup");
+          FATAL("fail to HG_Addr_lookup");
         } else {
           posted++;
         }
@@ -245,19 +244,19 @@ hg_return_t mssg_lookup(mssg_t* s, hg_context_t* hgctx) {
       hg_ret = HG_Trigger(hgctx, 0, 1, &hg_count);
     } while (hg_ret == HG_SUCCESS && hg_count > 0);
     if (hg_ret != HG_SUCCESS && hg_ret != HG_TIMEOUT) {
-      ABORT("fail to HG_Trigger");
+      FATAL("fail to HG_Trigger");
     }
 
     hg_ret = HG_Progress(hgctx, 100);
     if (hg_ret != HG_SUCCESS && hg_ret != HG_TIMEOUT) {
-      ABORT("fail to HG_Progress");
+      FATAL("fail to HG_Progress");
     }
   }
 
   for (int i = 1; i < s->num_addrs; i++) {
     const int r = (s->rank + i) % s->num_addrs;
     if (outs[r].ret != HG_SUCCESS) {
-      ABORT("HG cb failed");
+      FATAL("HG cb failed");
     } else {
       s->addrs[r] = outs[r].addr;
     }

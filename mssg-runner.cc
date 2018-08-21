@@ -74,8 +74,8 @@ static void complain(int ret, int r0only, const char* format, ...) {
 /*
  * abort with a fatal message
  */
-#define ABORT(msg) msg_abort(__FILE__, __LINE__, msg)
-static void msg_abort(const char* f, int d, const char* msg) {
+#define FATAL(msg) fatal(__FILE__, __LINE__, msg)
+static void fatal(const char* f, int d, const char* msg) {
   fprintf(stderr, "=== ABORT === ");
   fprintf(stderr, "%s (%s:%d)", msg, f, d);
   fprintf(stderr, "\n");
@@ -159,7 +159,7 @@ int main(int argc, char* argv[]) {
 
   /* mpich says we should call this early as possible */
   if (MPI_Init(&argc, &argv) != MPI_SUCCESS) {
-    ABORT("!MPI_Init");
+    FATAL("!MPI_Init");
   }
 
   /* we want lines!! */
@@ -168,9 +168,9 @@ int main(int argc, char* argv[]) {
   /* setup default to zero/null, except as noted below */
   memset(&g, 0, sizeof(g));
   if (MPI_Comm_rank(MPI_COMM_WORLD, &myrank) != MPI_SUCCESS)
-    ABORT("!MPI_Comm_rank");
+    FATAL("!MPI_Comm_rank");
   if (MPI_Comm_size(MPI_COMM_WORLD, &g.size) != MPI_SUCCESS)
-    ABORT("!MPI_Comm_size");
+    FATAL("!MPI_Comm_size");
 
   g.proto = DEF_PROTO;
   g.addr = DEF_ADDR;
@@ -244,7 +244,7 @@ int main(int argc, char* argv[]) {
 static void doit() {
   mssg_t* m;
 
-  m = mssg_init_mpi(p.hg_clz, MPI_COMM_WORLD, p.recv);
+  m = mssg_init_mpi(p.hg_clz, MPI_COMM_WORLD, p.is_receiver);
   if (!m) complain(EXIT_FAILURE, 0, "!mssg_init_mpi");
   mssg_lookup(m, p.hg_ctx);
 
