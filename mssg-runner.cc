@@ -230,6 +230,9 @@ int main(int argc, char* argv[]) {
 
   doit();
 
+  if (p.recv != MPI_COMM_NULL) MPI_Comm_free(&p.recv);
+  HG_Context_destroy(p.hg_ctx);
+  HG_Finalize(p.hg_clz);
   MPI_Finalize();
 
   return 0;
@@ -253,4 +256,6 @@ static void doit() {
       printf("\n");
     }
   }
+
+  mssg_finalize(m);
 }
