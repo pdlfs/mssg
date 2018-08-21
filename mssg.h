@@ -29,7 +29,7 @@ typedef struct mssg mssg_t;
  * @param recv the MPI communicator for receivers
  * @return pointer to our structure
  */
-mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm rec);
+mssg_t* mssg_init_mpi(hg_class_t* hgcl, MPI_Comm comm, MPI_Comm recv);
 
 /**
  * mssg_finalize: free mssg state
