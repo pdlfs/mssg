@@ -82,22 +82,22 @@ static void msg_abort(const char* f, int d, const char* msg) {
 /*
  * default values
  */
-#define DEF_PROTO "bmi"      /* default mercury protocol to use */
+#define DEF_PROTO "bmi+tcp"  /* default mercury protocol to use */
 #define DEF_ADDR "127.0.0.1" /* default address to use */
 #define DEF_RECVRADIX 0      /* everyone is both a sender and a receiver */
-#define DEF_PORT 5000        /* default port number for rank 0 */
+#define DEF_PORT 50000       /* default port number for rank 0 */
 #define DEF_TIMEOUT 120      /* alarm timeout */
 
 /*
  * gs: shared global data (e.g. from the command line)
  */
 static struct gs {
-  int size;    /* world size (from MPI) */
-  char* proto; /* mercury protocol string */
-  char* addr;  /* address to use*/
-  int rr;      /* receiver radix */
-  int port;    /* port number for rank 0 */
-  int timeout; /* alarm timeout */
+  int size;          /* world size (from MPI) */
+  const char* proto; /* mercury protocol string */
+  const char* addr;  /* address to use*/
+  int rr;            /* receiver radix */
+  int port;          /* port number for rank 0 */
+  int timeout;       /* alarm timeout */
 } g;
 
 /*
@@ -120,12 +120,26 @@ static void usage(const char* msg) {
   if (msg) fprintf(stderr, "%s: %s\n", argv0, msg);
   fprintf(stderr, "usage: %s [options]\n", argv0);
   fprintf(stderr, "\noptions:\n");
+  fprintf(stderr, "\t-p port     base port number\n");
+  fprintf(stderr, "\t-r radix    receiver radix [0-8]\n");
   fprintf(stderr, "\t-t sec      timeout (alarm), in seconds\n");
 
 skip_prints:
   MPI_Finalize();
   exit(1);
 }
+
+/*
+ * per-rank program state
+ */
+static struct ps {
+  char hg_url[256];
+  hg_context_t* hg_ctx;
+  hg_class_t* hg_clz;
+  unsigned int hg_recvmask;
+  int is_receiver;
+  MPI_Comm recv;
+} p;
 
 /*
  * forward prototype decls.
@@ -155,10 +169,88 @@ int main(int argc, char* argv[]) {
   if (MPI_Comm_size(MPI_COMM_WORLD, &g.size) != MPI_SUCCESS)
     ABORT("!MPI_Comm_size");
 
+  g.proto = DEF_PROTO;
+  g.addr = DEF_ADDR;
+  g.rr = DEF_RECVRADIX;
+  g.port = DEF_PORT;
+  g.timeout = DEF_TIMEOUT;
+
+  while ((ch = getopt(argc, argv, "p:r:t:")) != -1) {
+    switch (ch) {
+      case 'p':
+        g.port = atoi(optarg);
+        if (g.port < 0 || g.port > 65535) usage("bad port num");
+        break;
+      case 'r':
+        g.rr = atoi(optarg);
+        if (g.rr < 0 || g.rr > 8) usage("bad receiver radix");
+        break;
+      case 't':
+        g.timeout = atoi(optarg);
+        if (g.timeout < 0) usage("bad timeout");
+        break;
+      default:
+        usage(NULL);
+    }
+  }
+
+  if (myrank == 0) {
+    printf("== Program options:\n");
+    printf(" > MPI_rank   = %d\n", myrank);
+    printf(" > MPI_size   = %d\n", g.size);
+    printf(" > RECV_mask  = %d (radix=%d)\n", 32 - g.rr, g.rr);
+    printf(" > URL        = %s://%s:[%d+]\n", g.proto, g.addr, g.port);
+    printf(" > timeout    = %d secs\n", g.timeout);
+    printf("\n");
+  }
+
   signal(SIGALRM, sigalarm);
   alarm(g.timeout);
+
+  memset(&p, 0, sizeof(p));
+  p.recv = MPI_COMM_NULL;
+  p.hg_recvmask = ~static_cast<unsigned int>(0);
+  p.hg_recvmask <<= g.rr;
+  p.is_receiver = myrank == (myrank & p.hg_recvmask);
+  snprintf(p.hg_url, sizeof(p.hg_url), "%s://%s:%d", g.proto, g.addr,
+           g.port + myrank);
+
+  p.hg_clz = HG_Init(p.hg_url, p.is_receiver);
+  if (!p.hg_clz) complain(EXIT_FAILURE, 0, "!HG_Init");
+  p.hg_ctx = HG_Context_create(p.hg_clz);
+  if (!p.hg_ctx) complain(EXIT_FAILURE, 0, "!HG_Context_create");
+
+  MPI_Comm_split(MPI_COMM_WORLD, p.is_receiver ? 1 : MPI_UNDEFINED, myrank,
+                 &p.recv);
+  if (p.is_receiver) {
+    if (p.recv == MPI_COMM_NULL) {
+      complain(EXIT_FAILURE, 0, "!MPI_Comm_split");
+    }
+  }
+
+  doit();
 
   MPI_Finalize();
 
   return 0;
+}
+
+static void doit() {
+  mssg_t* m;
+
+  m = mssg_init_mpi(p.hg_clz, MPI_COMM_WORLD, p.recv);
+  if (!m) complain(EXIT_FAILURE, 0, "!mssg_init_mpi");
+  mssg_lookup(m, p.hg_ctx);
+
+  for (int r = 0; r < g.size; r++) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (myrank == r) {
+      printf("== Rank-%d\n", myrank);
+      printf("is_receiver? %d\n", p.is_receiver);
+      for (int i = 0; i < g.size; i++) {
+        printf("%d->%s\n", i, mssg_get_addr_str(m, i));
+      }
+      printf("\n");
+    }
+  }
 }
