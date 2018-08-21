@@ -71,6 +71,14 @@ hg_addr_t mssg_get_addr(const mssg_t* s, int rank);
 const char* mssg_get_addr_str(const mssg_t* s, int rank);
 
 /**
+ * mssg_backing_bufsize: get the size of the buffer backing all address strings
+ *
+ * @param s our mssg
+ * @return the size of the backing buffer store
+ */
+int mssg_backing_bufsize(const mssg_t* s);
+
+/**
  * mssg_lookup: lookup all the addresses of interest in one big go
  *
  * @param s our mssg

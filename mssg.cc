@@ -309,6 +309,13 @@ const char* mssg_get_addr_str(const mssg_t* s, int rank) {
 }
 
 /*
+ * mssg_backing_bufsize: return buffer size
+ */
+int mssg_backing_bufsize(const mssg_t* s) {
+  return (s != NULL) ? s->backing_bufsz : 0;
+}
+
+/*
  * mssg_finalize: we're done, free everything!
  */
 void mssg_finalize(mssg_t* s) {

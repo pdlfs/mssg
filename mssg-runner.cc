@@ -250,6 +250,7 @@ static void doit() {
     if (myrank == r) {
       printf("== Rank-%d\n", myrank);
       printf("is_receiver? %d\n", p.is_receiver);
+      printf("mssg_backing_bufsize: %d bytes\n", mssg_backing_bufsize(m));
       for (int i = 0; i < g.size; i++) {
         printf("%d->%s\n", i, mssg_get_addr_str(m, i));
       }
