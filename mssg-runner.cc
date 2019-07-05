@@ -29,7 +29,7 @@
  */
 
 /*
- * mssg-runner.cc a simple program for checking mssg functions.
+ * mssg-runner.cc a simple program for driving mssg routines.
  */
 #include "mssg.h"
 
@@ -85,10 +85,10 @@ static void fatal(const char* f, int d, const char* msg) {
 /*
  * default values
  */
+#define DEF_RECVRADIX 0      /* everyone is both a sender and a receiver */
 #define DEF_PROTO "bmi+tcp"  /* default mercury protocol to use */
 #define DEF_ADDR "127.0.0.1" /* default address to use */
-#define DEF_RECVRADIX 0      /* everyone is both a sender and a receiver */
-#define DEF_PORT 50000       /* default port number for rank 0 */
+#define DEF_PORT "50000"     /* default port number for rank 0 */
 #define DEF_TIMEOUT 120      /* alarm timeout */
 
 /*
@@ -98,8 +98,8 @@ static struct gs {
   int size;          /* world size (from MPI) */
   const char* proto; /* mercury protocol specifier */
   const char* addr;  /* hostname, ip, or the net interface to use */
+  const char* port;  /* port number for rank 0 */
   int rr;            /* receiver radix */
-  int port;          /* port number for rank 0 */
   int timeout;       /* alarm timeout */
 } g;
 
@@ -183,7 +183,7 @@ int main(int argc, char* argv[]) {
   while ((ch = getopt(argc, argv, "b:n:p:r:t:")) != -1) {
     switch (ch) {
       case 'b':
-        g.port = atoi(optarg);
+        g.port = optarg;
         break;
       case 'n':
         g.addr = optarg;
@@ -210,7 +210,7 @@ int main(int argc, char* argv[]) {
     printf(" > MPI_size   = %d\n", g.size);
     printf(" > HG_proto   = %s\n", g.proto);
     printf(" > HG_addr    = %s\n", g.addr);
-    printf(" > HG_port    = %d\n", g.port);
+    printf(" > HG_port    = %s\n", g.port);
     printf(" > recv_mask  = %d (radix=%d)\n", 32 - g.rr, g.rr);
     printf(" > timeout    = %d secs\n", g.timeout);
     printf("\n");
@@ -254,7 +254,7 @@ int main(int argc, char* argv[]) {
      * using bmi+tcp.
      */
     snprintf(p.hg_str, sizeof(p.hg_str), "bmi+tcp://%s:%d", g.addr,
-             g.port + myrank);
+             atoi(g.port) + myrank);
   } else if (strcmp(g.proto, "ofi+gni") == 0) {
     /*
      * as if libfabric v1.7.0, only hostname, ip, or the
@@ -273,9 +273,21 @@ int main(int argc, char* argv[]) {
      */
     snprintf(p.hg_str, sizeof(p.hg_str), "ofi+psm2");
   } else {
-    /* default: assume an ip:port format */
-    snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s:%d", g.proto, g.addr,
-             g.port + myrank);
+    /*
+     * default: assume an ip:port format.
+     * omit if specified as "x".
+     */
+    if (strcmp(g.addr, "x") != 0 && strcmp(g.port, "x") != 0) {
+      snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s:%d", g.proto, g.addr,
+               atoi(g.port) + myrank);
+    } else if (strcmp(g.port, "x") != 0) {
+      snprintf(p.hg_str, sizeof(p.hg_str), "%s://:%d", g.proto,
+               atoi(g.port) + myrank);
+    } else if (strcmp(g.addr, "x") != 0) {
+      snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s", g.proto, g.addr);
+    } else {
+      snprintf(p.hg_str, sizeof(p.hg_str), "%s", g.proto);
+    }
   }
 
   p.hg_clz = HG_Init(p.hg_str, p.is_receiver);
