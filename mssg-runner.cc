@@ -96,8 +96,8 @@ static void fatal(const char* f, int d, const char* msg) {
  */
 static struct gs {
   int size;          /* world size (from MPI) */
-  const char* proto; /* mercury protocol string */
-  const char* addr;  /* address to use*/
+  const char* proto; /* mercury protocol specifier */
+  const char* addr;  /* hostname, ip, or the net interface to use */
   int rr;            /* receiver radix */
   int port;          /* port number for rank 0 */
   int timeout;       /* alarm timeout */
@@ -123,9 +123,11 @@ static void usage(const char* msg) {
   if (msg) fprintf(stderr, "%s: %s\n", argv0, msg);
   fprintf(stderr, "usage: %s [options]\n", argv0);
   fprintf(stderr, "\noptions:\n");
-  fprintf(stderr, "\t-p port     base port number\n");
-  fprintf(stderr, "\t-r radix    receiver radix [0-8]\n");
-  fprintf(stderr, "\t-t sec      timeout (alarm), in seconds\n");
+  fprintf(stderr, "\t-p proto  hg proto\n");
+  fprintf(stderr, "\t-n addr   hostname, ip, or net interface\n");
+  fprintf(stderr, "\t-b base   base port number\n");
+  fprintf(stderr, "\t-r radix  receiver radix [0-8]\n");
+  fprintf(stderr, "\t-t sec    timeout (alarm), in seconds\n");
 
 skip_prints:
   MPI_Finalize();
@@ -133,10 +135,10 @@ skip_prints:
 }
 
 /*
- * per-rank program state
+ * per-rank program state (diffs from rank to rank)
  */
 static struct ps {
-  char hg_url[256];
+  char hg_str[256];
   hg_context_t* hg_ctx;
   hg_class_t* hg_clz;
   unsigned int hg_recvmask;
@@ -178,11 +180,16 @@ int main(int argc, char* argv[]) {
   g.port = DEF_PORT;
   g.timeout = DEF_TIMEOUT;
 
-  while ((ch = getopt(argc, argv, "p:r:t:")) != -1) {
+  while ((ch = getopt(argc, argv, "b:n:p:r:t:")) != -1) {
     switch (ch) {
-      case 'p':
+      case 'b':
         g.port = atoi(optarg);
-        if (g.port < 0 || g.port > 65535) usage("bad port num");
+        break;
+      case 'n':
+        g.addr = optarg;
+        break;
+      case 'p':
+        g.proto = optarg;
         break;
       case 'r':
         g.rr = atoi(optarg);
@@ -201,8 +208,10 @@ int main(int argc, char* argv[]) {
     printf("== Program options:\n");
     printf(" > MPI_rank   = %d\n", myrank);
     printf(" > MPI_size   = %d\n", g.size);
-    printf(" > RECV_mask  = %d (radix=%d)\n", 32 - g.rr, g.rr);
-    printf(" > URL        = %s://%s:[%d+]\n", g.proto, g.addr, g.port);
+    printf(" > HG_proto   = %s\n", g.proto);
+    printf(" > HG_addr    = %s\n", g.addr);
+    printf(" > HG_port    = %d\n", g.port);
+    printf(" > recv_mask  = %d (radix=%d)\n", 32 - g.rr, g.rr);
     printf(" > timeout    = %d secs\n", g.timeout);
     printf("\n");
   }
@@ -215,10 +224,61 @@ int main(int argc, char* argv[]) {
   p.hg_recvmask = ~static_cast<unsigned int>(0);
   p.hg_recvmask <<= g.rr;
   p.is_receiver = myrank == (myrank & p.hg_recvmask);
-  snprintf(p.hg_url, sizeof(p.hg_url), "%s://%s:%d", g.proto, g.addr,
-           g.port + myrank);
 
-  p.hg_clz = HG_Init(p.hg_url, p.is_receiver);
+  /* establish the addr str according to the proto requested at the cmd */
+  if (strcmp(g.proto, "na+sm") == 0) {
+    /*
+     * na+sm address = PID followed by a user-specified
+     * unique SM ID number.
+     */
+    snprintf(p.hg_str, sizeof(p.hg_str), "na+sm://%d:0", getpid());
+  } else if (strcmp(g.proto, "bmi+tcp") == 0) {
+    /*
+     * as if mercury v1.0.0, when we omit hostname/ip or port
+     * for server-side initialization, mercury will try to fill
+     * them in for us before passing the address to bmi.
+     * To determine the name of the host, mercury uses the
+     * POSIX gethostname() function. To decide a port, mercury
+     * retries from port 22222 to port 22222+128 until it
+     * finds a free port. This port detection process is not
+     * avoided when we set the port to 0.
+     *
+     * earlier versions of mercury does allow port 0 to be
+     * passed to bmi, which in turn will honor it and will pass
+     * it to the OS so the OS can pick up a free port for us.
+     * Yet, unfortunately, if we later try to retrieve the
+     * final address, bmi will return port 0 back to us rather
+     * than the actual port picked up by the OS.
+     *
+     * conclusion: always pass full address information when
+     * using bmi+tcp.
+     */
+    snprintf(p.hg_str, sizeof(p.hg_str), "bmi+tcp://%s:%d", g.addr,
+             g.port + myrank);
+  } else if (strcmp(g.proto, "ofi+gni") == 0) {
+    /*
+     * as if libfabric v1.7.0, only hostname, ip, or the
+     * interface name of the NIC is used by the driver to select
+     * an underlying adaptor. Port number is not used and
+     * will be ignored if specified.
+     *
+     * as if mercury v1.0.0, when we omit hostname, ip, or the
+     * interface name of the NIC, mercury will use "ipogif0".
+     */
+    snprintf(p.hg_str, sizeof(p.hg_str), "ofi+gni://%s", g.addr);
+  } else if (strcmp(g.proto, "ofi+psm2") == 0) {
+    /*
+     * as if libfabric v1.7.0, any hostname, ip, NIC interface name,
+     * or port number specified will be ignored.
+     */
+    snprintf(p.hg_str, sizeof(p.hg_str), "ofi+psm2");
+  } else {
+    /* default: assume an ip:port format */
+    snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s:%d", g.proto, g.addr,
+             g.port + myrank);
+  }
+
+  p.hg_clz = HG_Init(p.hg_str, p.is_receiver);
   if (!p.hg_clz) complain(EXIT_FAILURE, 0, "!HG_Init");
   p.hg_ctx = HG_Context_create(p.hg_clz);
   if (!p.hg_ctx) complain(EXIT_FAILURE, 0, "!HG_Context_create");
@@ -248,14 +308,20 @@ static void doit() {
   if (!m) complain(EXIT_FAILURE, 0, "!mssg_init_mpi");
   mssg_lookup(m, p.hg_ctx);
 
+  if (myrank == 0) printf("== Results:\n\n");
   for (int r = 0; r < g.size; r++) {
     MPI_Barrier(MPI_COMM_WORLD);
     if (myrank == r) {
-      printf("== Rank-%d\n", myrank);
+      printf("[rank-%d]\n", myrank);
       printf("is_receiver? %d\n", p.is_receiver);
       printf("mssg_backing_bufsize: %d bytes\n", mssg_backing_bufsize(m));
       for (int i = 0; i < g.size; i++) {
-        printf("%d->%s\n", i, mssg_get_addr_str(m, i));
+        const char* const str = mssg_get_addr_str(m, i);
+        if (myrank == i && strcmp(p.hg_str, str) != 0) {
+          printf("%d=%s (init=%s)\n", i, str, p.hg_str);
+        } else {
+          printf("%d=%s\n", i, str);
+        }
       }
       printf("\n");
     }
