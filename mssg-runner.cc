@@ -234,10 +234,10 @@ int main(int argc, char* argv[]) {
     snprintf(p.hg_str, sizeof(p.hg_str), "na+sm://%d:0", getpid());
   } else if (strcmp(g.proto, "bmi+tcp") == 0) {
     /*
-     * as if mercury v1.0.0, when we omit hostname/ip or port
+     * as if mercury v1.0.0, when we omit the hostname/ip or the port
      * for server-side initialization, mercury will try to fill
      * them in for us before passing the address to bmi.
-     * To determine the name of the host, mercury uses the
+     * To determine the hostname to bind, mercury uses the
      * POSIX gethostname() function. To decide a port, mercury
      * retries from port 22222 to port 22222+128 until it
      * finds a free port. This port detection process is not
@@ -257,30 +257,34 @@ int main(int argc, char* argv[]) {
              atoi(g.port) + myrank);
   } else if (strcmp(g.proto, "ofi+gni") == 0) {
     /*
-     * as if libfabric v1.7.0, only hostname, ip, or the
-     * interface name of the NIC can be used by the driver to select
-     * an underlying adaptor. Port number is not used and
-     * will be ignored if specified.
-     *
-     * as if mercury v1.0.0, when we omit hostname, ip, or the
-     * interface name of the NIC, mercury will use "ipogif0".
+     * as if mercury v1.0.0, mercury will use the hostname, ip addr,
+     * or the nic's interface name one specifies to determine the ip addr
+     * to be passed to ofi. Port number is not used and
+     * will be ignored if specified. When hostname/ip/iface is
+     * omitted, mercury will use ipogif0.
      */
     snprintf(p.hg_str, sizeof(p.hg_str), "ofi+gni://%s", g.host);
   } else if (strcmp(g.proto, "ofi+psm2") == 0) {
     /*
-     * as if libfabric v1.7.0, any hostname, ip, NIC interface name,
-     * or port number specified will be ignored.
+     * as if mercury v1.0.0, mercury will not pass any addr
+     * information to ofi for psm2. Any hostname/ip/iface or
+     * port number specified will be ignored.
      */
     snprintf(p.hg_str, sizeof(p.hg_str), "ofi+psm2");
   } else {
     /*
-     * in general, we assume an "<hostname,ip,iface>:port" format. we will omit
-     * either of the port or the hostname if it is specified as "x".
-     * both ofi+tcp and ofi+verbs allow the port or both to be omitted.
+     * in general, we assume an "<hostname/ip/iface>:<port>" format.
+     * We will omit the port or the hostname/ip/iface if it is
+     * specified as "x". note also that while the following code allows
+     * specifying only the port and not the hostname/ip/iface,
+     * mercury may not accept it for a specific proto.
      *
-     * note also that while the following code allows specifying only the
-     * port and not the hostname, the underlying transport may not
-     * recognize this address format.
+     * Both ofi+tcp and ofi+verbs allow the port or both the port
+     * and the hostname/ip/iface to be omitted, in which case no
+     * addr information will be passed to ofi. If hostname/ip/iface
+     * is specified, it will be converted to iface and ip before given
+     * to ofi. Additionally, if port is specified, it will be sent
+     * to ofi too.
      */
     if (strcmp(g.host, "x") != 0 && strcmp(g.port, "x") != 0) {
       snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s:%d", g.proto, g.host,
