@@ -87,7 +87,7 @@ static void fatal(const char* f, int d, const char* msg) {
  */
 #define DEF_RECVRADIX 0      /* everyone is both a sender and a receiver */
 #define DEF_PROTO "bmi+tcp"  /* default mercury protocol to use */
-#define DEF_ADDR "127.0.0.1" /* default address to use */
+#define DEF_HOST "127.0.0.1" /* default address to use */
 #define DEF_PORT "50000"     /* default port number for rank 0 */
 #define DEF_TIMEOUT 120      /* alarm timeout */
 
@@ -97,7 +97,7 @@ static void fatal(const char* f, int d, const char* msg) {
 static struct gs {
   int size;          /* world size (from MPI) */
   const char* proto; /* mercury protocol specifier */
-  const char* addr;  /* hostname, ip, or the net interface to use */
+  const char* host;  /* hostname, ip, or the net interface to use */
   const char* port;  /* port number for rank 0 */
   int rr;            /* receiver radix */
   int timeout;       /* alarm timeout */
@@ -123,11 +123,11 @@ static void usage(const char* msg) {
   if (msg) fprintf(stderr, "%s: %s\n", argv0, msg);
   fprintf(stderr, "usage: %s [options]\n", argv0);
   fprintf(stderr, "\noptions:\n");
-  fprintf(stderr, "\t-p proto  hg proto\n");
-  fprintf(stderr, "\t-n addr   hostname, ip, or net interface\n");
-  fprintf(stderr, "\t-b base   base port number\n");
-  fprintf(stderr, "\t-r radix  receiver radix [0-8]\n");
-  fprintf(stderr, "\t-t sec    timeout (alarm), in seconds\n");
+  fprintf(stderr, "\t-P proto    hg proto\n");
+  fprintf(stderr, "\t-H host     hostname, ip, or net interface\n");
+  fprintf(stderr, "\t-p port     base port number\n");
+  fprintf(stderr, "\t-r radix    receiver radix [0-8]\n");
+  fprintf(stderr, "\t-t sec      timeout (alarm), in seconds\n");
 
 skip_prints:
   MPI_Finalize();
@@ -175,20 +175,20 @@ int main(int argc, char* argv[]) {
     FATAL("!MPI_Comm_size");
 
   g.proto = DEF_PROTO;
-  g.addr = DEF_ADDR;
+  g.host = DEF_HOST;
   g.rr = DEF_RECVRADIX;
   g.port = DEF_PORT;
   g.timeout = DEF_TIMEOUT;
 
-  while ((ch = getopt(argc, argv, "b:n:p:r:t:")) != -1) {
+  while ((ch = getopt(argc, argv, "p:H:P:r:t:h")) != -1) {
     switch (ch) {
-      case 'b':
+      case 'p':
         g.port = optarg;
         break;
-      case 'n':
-        g.addr = optarg;
+      case 'H':
+        g.host = optarg;
         break;
-      case 'p':
+      case 'P':
         g.proto = optarg;
         break;
       case 'r':
@@ -209,7 +209,7 @@ int main(int argc, char* argv[]) {
     printf(" > MPI_rank   = %d\n", myrank);
     printf(" > MPI_size   = %d\n", g.size);
     printf(" > HG_proto   = %s\n", g.proto);
-    printf(" > HG_addr    = %s\n", g.addr);
+    printf(" > HG_host    = %s\n", g.host);
     printf(" > HG_port    = %s\n", g.port);
     printf(" > recv_mask  = %d (radix=%d)\n", 32 - g.rr, g.rr);
     printf(" > timeout    = %d secs\n", g.timeout);
@@ -253,19 +253,19 @@ int main(int argc, char* argv[]) {
      * conclusion: always pass full address information when
      * using bmi+tcp.
      */
-    snprintf(p.hg_str, sizeof(p.hg_str), "bmi+tcp://%s:%d", g.addr,
+    snprintf(p.hg_str, sizeof(p.hg_str), "bmi+tcp://%s:%d", g.host,
              atoi(g.port) + myrank);
   } else if (strcmp(g.proto, "ofi+gni") == 0) {
     /*
      * as if libfabric v1.7.0, only hostname, ip, or the
-     * interface name of the NIC is used by the driver to select
+     * interface name of the NIC can be used by the driver to select
      * an underlying adaptor. Port number is not used and
      * will be ignored if specified.
      *
      * as if mercury v1.0.0, when we omit hostname, ip, or the
      * interface name of the NIC, mercury will use "ipogif0".
      */
-    snprintf(p.hg_str, sizeof(p.hg_str), "ofi+gni://%s", g.addr);
+    snprintf(p.hg_str, sizeof(p.hg_str), "ofi+gni://%s", g.host);
   } else if (strcmp(g.proto, "ofi+psm2") == 0) {
     /*
      * as if libfabric v1.7.0, any hostname, ip, NIC interface name,
@@ -274,17 +274,22 @@ int main(int argc, char* argv[]) {
     snprintf(p.hg_str, sizeof(p.hg_str), "ofi+psm2");
   } else {
     /*
-     * default: assume an ip:port format.
-     * omit if specified as "x".
+     * in general, we assume an "<hostname,ip,iface>:port" format. we will omit
+     * either of the port or the hostname if it is specified as "x".
+     * both ofi+tcp and ofi+verbs allow the port or both to be omitted.
+     *
+     * note also that while the following code allows specifying only the
+     * port and not the hostname, the underlying transport may not
+     * recognize this address format.
      */
-    if (strcmp(g.addr, "x") != 0 && strcmp(g.port, "x") != 0) {
-      snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s:%d", g.proto, g.addr,
+    if (strcmp(g.host, "x") != 0 && strcmp(g.port, "x") != 0) {
+      snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s:%d", g.proto, g.host,
                atoi(g.port) + myrank);
     } else if (strcmp(g.port, "x") != 0) {
       snprintf(p.hg_str, sizeof(p.hg_str), "%s://:%d", g.proto,
                atoi(g.port) + myrank);
-    } else if (strcmp(g.addr, "x") != 0) {
-      snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s", g.proto, g.addr);
+    } else if (strcmp(g.host, "x") != 0) {
+      snprintf(p.hg_str, sizeof(p.hg_str), "%s://%s", g.proto, g.host);
     } else {
       snprintf(p.hg_str, sizeof(p.hg_str), "%s", g.proto);
     }
